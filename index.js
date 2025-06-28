@@ -16,10 +16,10 @@ const pool = new Pool({
   connectionString:
     "postgres://neondb_owner:npg_hx2bA3MZtcWB@ep-lively-sun-acqls4c2-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require",
   ssl: { rejectUnauthorized: false },
-  max: 10, // Reduced pool size
+  max: 10,
   min: 0,
-  idleTimeoutMillis: 10000, // Shorter idle timeout
-  connectionTimeoutMillis: 5000, // Longer connection timeout
+  idleTimeoutMillis: 10000,
+  connectionTimeoutMillis: 5000,
   acquireTimeoutMillis: 5000,
   createTimeoutMillis: 5000,
   destroyTimeoutMillis: 5000,
@@ -67,7 +67,12 @@ testConnection()
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:3001", "https://v0-react-dsa-website-ashiks-projects-9613a13b.vercel.app"],
+    origin: [
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://v0-react-dsa-website-ashiks-projects-9613a13b.vercel.app",
+      "https://your-frontend-domain.vercel.app",
+    ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -76,13 +81,13 @@ app.use(
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 
-// Simple auth middleware
+// Simple auth middleware - Updated to use proper UUID
 function authenticateToken(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "")
 
   if (token === "simple-admin-token-123") {
     req.user = {
-      id: "admin-user-id",
+      id: "550e8400-e29b-41d4-a716-446655440000", // Valid UUID format
       email: "admin@example.com",
       name: "Admin User",
       role: "admin",
@@ -128,6 +133,11 @@ app.get("/", (req, res) => {
         create: "POST /api/interviews",
         update: "PUT /api/interviews/:id",
         delete: "DELETE /api/interviews/:id",
+      },
+      bookmarks: {
+        getAll: "GET /api/bookmarks",
+        add: "POST /api/bookmarks",
+        remove: "DELETE /api/bookmarks/:id",
       },
     },
   })
@@ -187,75 +197,81 @@ app.get("/api/check-tables", async (req, res) => {
   }
 })
 
-// Create all required tables
+// Create all required tables - Updated to match your exact schema
 app.post("/api/create-tables", async (req, res) => {
   try {
-    // Create problems table
+    // Enable uuid-ossp extension if not already enabled
+    await queryDatabase(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`)
+
+    // Create users table - matching your schema exactly
+    await queryDatabase(`
+      CREATE TABLE IF NOT EXISTS users (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        email VARCHAR(255) UNIQUE NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
+    // Create problems table - matching your schema exactly
     await queryDatabase(`
       CREATE TABLE IF NOT EXISTS problems (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         title VARCHAR(255) NOT NULL,
-        difficulty VARCHAR(50) NOT NULL CHECK (difficulty IN ('Easy', 'Medium', 'Hard')),
+        difficulty VARCHAR(20) NOT NULL CHECK (difficulty IN ('Easy', 'Medium', 'Hard')),
         category VARCHAR(100) NOT NULL,
         tags TEXT[] DEFAULT '{}',
         description TEXT NOT NULL,
         explanation TEXT,
         code TEXT,
-        test_cases JSONB DEFAULT '[]',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        test_cases TEXT,
+        author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `)
 
-    // Create notes table
+    // Create notes table - matching your schema exactly
     await queryDatabase(`
       CREATE TABLE IF NOT EXISTS notes (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         title VARCHAR(255) NOT NULL,
         category VARCHAR(100) NOT NULL,
         tags TEXT[] DEFAULT '{}',
         description TEXT,
         content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `)
 
-    // Create interviews table
+    // Create interviews table - matching your schema exactly
     await queryDatabase(`
       CREATE TABLE IF NOT EXISTS interviews (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         title VARCHAR(255) NOT NULL,
         category VARCHAR(100) NOT NULL,
         tags TEXT[] DEFAULT '{}',
         description TEXT,
         content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       )
     `)
 
-    // Create users table
-    await queryDatabase(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email VARCHAR(255) UNIQUE NOT NULL,
-        name VARCHAR(255) NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(50) DEFAULT 'user' CHECK (role IN ('user', 'admin')),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    // Create bookmarks table
+    // Create bookmarks table - matching your schema exactly
     await queryDatabase(`
       CREATE TABLE IF NOT EXISTS bookmarks (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         item_id UUID NOT NULL,
-        item_type VARCHAR(50) NOT NULL CHECK (item_type IN ('problem', 'note', 'interview')),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        item_type VARCHAR(20) NOT NULL CHECK (item_type IN ('problem', 'note', 'interview')),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(user_id, item_id, item_type)
       )
     `)
@@ -263,14 +279,17 @@ app.post("/api/create-tables", async (req, res) => {
     // Create indexes for better performance
     await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_problems_category ON problems(category)`)
     await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_problems_difficulty ON problems(difficulty)`)
+    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_problems_author ON problems(author_id)`)
     await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(category)`)
+    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_notes_author ON notes(author_id)`)
     await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_interviews_category ON interviews(category)`)
+    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_interviews_author ON interviews(author_id)`)
     await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON bookmarks(user_id)`)
 
     res.json({
       success: true,
       message: "All tables and indexes created successfully!",
-      tables: ["problems", "notes", "interviews", "users", "bookmarks"],
+      tables: ["users", "problems", "notes", "interviews", "bookmarks"],
     })
   } catch (error) {
     res.status(500).json({
@@ -281,49 +300,62 @@ app.post("/api/create-tables", async (req, res) => {
   }
 })
 
-// Insert sample data
+// Insert sample data - Updated to work with your schema
 app.post("/api/seed-data", async (req, res) => {
   try {
-    // Insert sample problems
+    // First, insert a sample admin user
     await queryDatabase(`
-      INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases)
+      INSERT INTO users (id, email, name, password_hash, role)
+      VALUES ('550e8400-e29b-41d4-a716-446655440000', 'admin@example.com', 'Admin User', 'hashed_password_here', 'admin')
+      ON CONFLICT (email) DO NOTHING
+    `)
+
+    // Insert sample problems with author_id
+    await queryDatabase(`
+      INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases, author_id)
       VALUES 
       ('Two Sum', 'Easy', 'Array', ARRAY['array', 'hash-table'], 
        'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.',
        'Use a hash map to store the complement of each number as you iterate through the array.',
        'function twoSum(nums, target) {\n  const map = new Map();\n  for (let i = 0; i < nums.length; i++) {\n    const complement = target - nums[i];\n    if (map.has(complement)) {\n      return [map.get(complement), i];\n    }\n    map.set(nums[i], i);\n  }\n  return [];\n}',
-       '[{"input": {"nums": [2,7,11,15], "target": 9}, "output": [0,1]}, {"input": {"nums": [3,2,4], "target": 6}, "output": [1,2]}]'::jsonb),
+       '[{"input": {"nums": [2,7,11,15], "target": 9}, "output": [0,1]}, {"input": {"nums": [3,2,4], "target": 6}, "output": [1,2]}]',
+       '550e8400-e29b-41d4-a716-446655440000'),
       ('Reverse String', 'Easy', 'String', ARRAY['string', 'two-pointers'], 
        'Write a function that reverses a string. The input string is given as an array of characters s.',
        'Use two pointers approach - one at the beginning and one at the end, swap characters and move towards center.',
        'function reverseString(s) {\n  let left = 0;\n  let right = s.length - 1;\n  while (left < right) {\n    [s[left], s[right]] = [s[right], s[left]];\n    left++;\n    right--;\n  }\n  return s;\n}',
-       '[{"input": {"s": ["h","e","l","l","o"]}, "output": ["o","l","l","e","h"]}, {"input": {"s": ["H","a","n","n","a","h"]}, "output": ["h","a","n","n","a","H"]}]'::jsonb)
+       '[{"input": {"s": ["h","e","l","l","o"]}, "output": ["o","l","l","e","h"]}, {"input": {"s": ["H","a","n","n","a","h"]}, "output": ["h","a","n","n","a","H"]}]',
+       '550e8400-e29b-41d4-a716-446655440000')
       ON CONFLICT DO NOTHING
     `)
 
-    // Insert sample notes
+    // Insert sample notes with author_id
     await queryDatabase(`
-      INSERT INTO notes (title, category, tags, description, content)
+      INSERT INTO notes (title, category, tags, description, content, author_id)
       VALUES 
       ('JavaScript Closures', 'JavaScript', ARRAY['javascript', 'closures', 'scope'], 
        'Understanding closures in JavaScript',
-       '# JavaScript Closures\n\nA closure is a function that has access to variables in its outer (enclosing) scope even after the outer function has returned.\n\n## Example\n\n\`\`\`javascript\nfunction outerFunction(x) {\n  return function innerFunction(y) {\n    return x + y;\n  };\n}\n\nconst addFive = outerFunction(5);\nconsole.log(addFive(3)); // 8\n\`\`\`'),
+       '# JavaScript Closures\n\nA closure is a function that has access to variables in its outer (enclosing) scope even after the outer function has returned.\n\n## Example\n\n\`\`\`javascript\nfunction outerFunction(x) {\n  return function innerFunction(y) {\n    return x + y;\n  };\n}\n\nconst addFive = outerFunction(5);\nconsole.log(addFive(3)); // 8\n\`\`\`',
+       '550e8400-e29b-41d4-a716-446655440000'),
       ('Big O Notation', 'Algorithms', ARRAY['algorithms', 'complexity', 'big-o'], 
        'Understanding time and space complexity',
-       '# Big O Notation\n\nBig O notation describes the performance or complexity of an algorithm.\n\n## Common Complexities\n\n- O(1) - Constant time\n- O(log n) - Logarithmic time\n- O(n) - Linear time\n- O(n log n) - Linearithmic time\n- O(n²) - Quadratic time')
+       '# Big O Notation\n\nBig O notation describes the performance or complexity of an algorithm.\n\n## Common Complexities\n\n- O(1) - Constant time\n- O(log n) - Logarithmic time\n- O(n) - Linear time\n- O(n log n) - Linearithmic time\n- O(n²) - Quadratic time',
+       '550e8400-e29b-41d4-a716-446655440000')
       ON CONFLICT DO NOTHING
     `)
 
-    // Insert sample interviews
+    // Insert sample interviews with author_id
     await queryDatabase(`
-      INSERT INTO interviews (title, category, tags, description, content)
+      INSERT INTO interviews (title, category, tags, description, content, author_id)
       VALUES 
       ('React Hooks Interview Questions', 'React', ARRAY['react', 'hooks', 'interview'], 
        'Common React Hooks interview questions and answers',
-       '# React Hooks Interview Questions\n\n## 1. What are React Hooks?\n\nReact Hooks are functions that let you use state and other React features in functional components.\n\n## 2. What is useState?\n\nuseState is a Hook that lets you add state to functional components.\n\n\`\`\`javascript\nconst [count, setCount] = useState(0);\n\`\`\`'),
+       '# React Hooks Interview Questions\n\n## 1. What are React Hooks?\n\nReact Hooks are functions that let you use state and other React features in functional components.\n\n## 2. What is useState?\n\nuseState is a Hook that lets you add state to functional components.\n\n\`\`\`javascript\nconst [count, setCount] = useState(0);\n\`\`\`',
+       '550e8400-e29b-41d4-a716-446655440000'),
       ('JavaScript Interview Questions', 'JavaScript', ARRAY['javascript', 'interview', 'fundamentals'], 
        'Essential JavaScript interview questions',
-       '# JavaScript Interview Questions\n\n## 1. What is hoisting?\n\nHoisting is JavaScript''s default behavior of moving declarations to the top of their scope.\n\n## 2. What is the difference between let, const, and var?\n\n- var: function-scoped, can be redeclared\n- let: block-scoped, cannot be redeclared\n- const: block-scoped, cannot be redeclared or reassigned')
+       '# JavaScript Interview Questions\n\n## 1. What is hoisting?\n\nHoisting is JavaScript''s default behavior of moving declarations to the top of their scope.\n\n## 2. What is the difference between let, const, and var?\n\n- var: function-scoped, can be redeclared\n- let: block-scoped, cannot be reassigned',
+       '550e8400-e29b-41d4-a716-446655440000')
       ON CONFLICT DO NOTHING
     `)
 
@@ -347,28 +379,30 @@ app.get("/api/problems", async (req, res) => {
   try {
     const { category, difficulty, search } = req.query
     let query = `
-      SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at
-      FROM problems 
+      SELECT p.id, p.title, p.difficulty, p.category, p.tags, p.description, p.explanation, p.code, p.test_cases, p.created_at,
+             u.name as author_name
+      FROM problems p
+      LEFT JOIN users u ON p.author_id = u.id
       WHERE 1=1
     `
     const params = []
 
     if (category) {
       params.push(category)
-      query += ` AND category = $${params.length}`
+      query += ` AND p.category = $${params.length}`
     }
 
     if (difficulty) {
       params.push(difficulty)
-      query += ` AND difficulty = $${params.length}`
+      query += ` AND p.difficulty = $${params.length}`
     }
 
     if (search) {
       params.push(`%${search}%`)
-      query += ` AND (title ILIKE $${params.length} OR description ILIKE $${params.length})`
+      query += ` AND (p.title ILIKE $${params.length} OR p.description ILIKE $${params.length})`
     }
 
-    query += ` ORDER BY created_at DESC`
+    query += ` ORDER BY p.created_at DESC`
 
     const result = await queryDatabase(query, params)
 
@@ -391,8 +425,11 @@ app.get("/api/problems/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at
-       FROM problems WHERE id = $1`,
+      `SELECT p.id, p.title, p.difficulty, p.category, p.tags, p.description, p.explanation, p.code, p.test_cases, p.created_at,
+              u.name as author_name
+       FROM problems p
+       LEFT JOIN users u ON p.author_id = u.id
+       WHERE p.id = $1`,
       [id],
     )
 
@@ -429,10 +466,10 @@ app.post("/api/problems", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases, author_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at`,
-      [title, difficulty, category, tags || [], description, explanation, code, test_cases || []],
+      [title, difficulty, category, tags || [], description, explanation, code, test_cases, req.user.id],
     )
 
     res.status(201).json({
@@ -527,23 +564,25 @@ app.get("/api/notes", async (req, res) => {
   try {
     const { category, search } = req.query
     let query = `
-      SELECT id, title, category, tags, description, content, created_at
-      FROM notes 
+      SELECT n.id, n.title, n.category, n.tags, n.description, n.content, n.created_at,
+             u.name as author_name
+      FROM notes n
+      LEFT JOIN users u ON n.author_id = u.id
       WHERE 1=1
     `
     const params = []
 
     if (category) {
       params.push(category)
-      query += ` AND category = $${params.length}`
+      query += ` AND n.category = $${params.length}`
     }
 
     if (search) {
       params.push(`%${search}%`)
-      query += ` AND (title ILIKE $${params.length} OR description ILIKE $${params.length} OR content ILIKE $${params.length})`
+      query += ` AND (n.title ILIKE $${params.length} OR n.description ILIKE $${params.length} OR n.content ILIKE $${params.length})`
     }
 
-    query += ` ORDER BY created_at DESC`
+    query += ` ORDER BY n.created_at DESC`
 
     const result = await queryDatabase(query, params)
 
@@ -566,8 +605,11 @@ app.get("/api/notes/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, category, tags, description, content, created_at
-       FROM notes WHERE id = $1`,
+      `SELECT n.id, n.title, n.category, n.tags, n.description, n.content, n.created_at,
+              u.name as author_name
+       FROM notes n
+       LEFT JOIN users u ON n.author_id = u.id
+       WHERE n.id = $1`,
       [id],
     )
 
@@ -604,10 +646,10 @@ app.post("/api/notes", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO notes (title, category, tags, description, content)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO notes (title, category, tags, description, content, author_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, title, category, tags, description, content, created_at`,
-      [title, category, tags || [], description, content],
+      [title, category, tags || [], description, content, req.user.id],
     )
 
     res.status(201).json({
@@ -699,23 +741,25 @@ app.get("/api/interviews", async (req, res) => {
   try {
     const { category, search } = req.query
     let query = `
-      SELECT id, title, category, tags, description, content, created_at
-      FROM interviews 
+      SELECT i.id, i.title, i.category, i.tags, i.description, i.content, i.created_at,
+             u.name as author_name
+      FROM interviews i
+      LEFT JOIN users u ON i.author_id = u.id
       WHERE 1=1
     `
     const params = []
 
     if (category) {
       params.push(category)
-      query += ` AND category = $${params.length}`
+      query += ` AND i.category = $${params.length}`
     }
 
     if (search) {
       params.push(`%${search}%`)
-      query += ` AND (title ILIKE $${params.length} OR description ILIKE $${params.length} OR content ILIKE $${params.length})`
+      query += ` AND (i.title ILIKE $${params.length} OR i.description ILIKE $${params.length} OR i.content ILIKE $${params.length})`
     }
 
-    query += ` ORDER BY created_at DESC`
+    query += ` ORDER BY i.created_at DESC`
 
     const result = await queryDatabase(query, params)
 
@@ -738,8 +782,11 @@ app.get("/api/interviews/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, category, tags, description, content, created_at
-       FROM interviews WHERE id = $1`,
+      `SELECT i.id, i.title, i.category, i.tags, i.description, i.content, i.created_at,
+              u.name as author_name
+       FROM interviews i
+       LEFT JOIN users u ON i.author_id = u.id
+       WHERE i.id = $1`,
       [id],
     )
 
@@ -776,10 +823,10 @@ app.post("/api/interviews", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO interviews (title, category, tags, description, content)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO interviews (title, category, tags, description, content, author_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, title, category, tags, description, content, created_at`,
-      [title, category, tags || [], description, content],
+      [title, category, tags || [], description, content, req.user.id],
     )
 
     res.status(201).json({
@@ -884,7 +931,7 @@ app.post("/api/auth/login", async (req, res) => {
         success: true,
         message: "Login successful",
         user: {
-          id: "admin-user-id",
+          id: "550e8400-e29b-41d4-a716-446655440000", // Valid UUID format
           email: "admin@example.com",
           name: "Admin User",
           role: "admin",
@@ -916,7 +963,7 @@ app.get("/api/auth/me", authenticateToken, (req, res) => {
 
 // ==================== BOOKMARKS ENDPOINTS ====================
 
-// Get user bookmarks
+// Get user bookmarks - Updated to work with your schema
 app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
     const { item_type } = req.query
@@ -958,7 +1005,7 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Add bookmark
+// Add bookmark - Updated to work with your schema (UUID item_id)
 app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
     const { item_id, item_type } = req.body
@@ -967,6 +1014,14 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: "item_id and item_type are required",
+      })
+    }
+
+    // Validate item_type
+    if (!["problem", "note", "interview"].includes(item_type)) {
+      return res.status(400).json({
+        success: false,
+        error: "item_type must be 'problem', 'note', or 'interview'",
       })
     }
 
@@ -1007,6 +1062,37 @@ app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
     const result = await queryDatabase(
       `DELETE FROM bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
       [id, req.user.id],
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Bookmark not found",
+      })
+    }
+
+    res.json({
+      success: true,
+      message: "Bookmark removed successfully",
+      deleted: result.rows[0],
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Failed to remove bookmark",
+      details: error.message,
+    })
+  }
+})
+
+// Remove bookmark by item - Alternative endpoint for easier frontend integration
+app.delete("/api/bookmarks/item/:item_id/:item_type", authenticateToken, async (req, res) => {
+  try {
+    const { item_id, item_type } = req.params
+
+    const result = await queryDatabase(
+      `DELETE FROM bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3 RETURNING id, item_id, item_type`,
+      [req.user.id, item_id, item_type],
     )
 
     if (result.rows.length === 0) {
