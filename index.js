@@ -195,18 +195,27 @@ app.use(express.urlencoded({ extended: true }))
 
 // Simple auth middleware
 function authenticateToken(req, res, next) {
-  const token = req.headers.authorization?.replace("Bearer ", "")
+  const authHeader = req.headers["authorization"]
+  const token = authHeader && authHeader.split(" ")[1]
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: "Invalid or missing token" })
+  }
 
   if (token === "simple-admin-token-123") {
-    req.user = { id: "admin", role: "admin" }
-    next()
-  } else {
-    res.status(401).json({
-      success: false,
-      error: "Invalid or missing token",
-    })
+    req.user = { id: "admin" }
+    return next()
   }
+
+  if (token.startsWith("user-token-")) {
+    const userId = token.replace("user-token-", "")
+    req.user = { id: userId }
+    return next()
+  }
+
+  return res.status(403).json({ success: false, error: "Invalid token format" })
 }
+
 
 // Health check endpoint
 app.get("/", (req, res) => {
