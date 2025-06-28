@@ -141,17 +141,11 @@ app.use(
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 
-// Simple auth middleware - Just check for the token, no user creation needed
+// Simple auth middleware - Just check for the token
 function authenticateToken(req, res, next) {
   const token = req.headers.authorization?.replace("Bearer ", "")
 
   if (token === "simple-admin-token-123") {
-    req.user = {
-      id: "admin", // Simple string ID
-      email: "admin@example.com",
-      name: "Admin User",
-      role: "admin",
-    }
     next()
   } else {
     res.status(401).json({
@@ -257,158 +251,6 @@ app.get("/api/check-tables", async (req, res) => {
   }
 })
 
-// Create all required tables - Simplified without author_id foreign key constraints
-app.post("/api/create-tables", async (req, res) => {
-  try {
-    // Enable uuid-ossp extension if not already enabled
-    await queryDatabase(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`)
-
-    // Create problems table - NO foreign key constraint on author_id
-    await queryDatabase(`
-      CREATE TABLE IF NOT EXISTS problems (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(255) NOT NULL,
-        difficulty VARCHAR(20) NOT NULL CHECK (difficulty IN ('Easy', 'Medium', 'Hard')),
-        category VARCHAR(100) NOT NULL,
-        tags TEXT[] DEFAULT '{}',
-        description TEXT NOT NULL,
-        explanation TEXT,
-        code TEXT,
-        test_cases TEXT,
-        author_id VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    // Create notes table - NO foreign key constraint on author_id
-    await queryDatabase(`
-      CREATE TABLE IF NOT EXISTS notes (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(255) NOT NULL,
-        category VARCHAR(100) NOT NULL,
-        tags TEXT[] DEFAULT '{}',
-        description TEXT,
-        content TEXT NOT NULL,
-        author_id VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    // Create interviews table - NO foreign key constraint on author_id
-    await queryDatabase(`
-      CREATE TABLE IF NOT EXISTS interviews (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        title VARCHAR(255) NOT NULL,
-        category VARCHAR(100) NOT NULL,
-        tags TEXT[] DEFAULT '{}',
-        description TEXT,
-        content TEXT NOT NULL,
-        author_id VARCHAR(255),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    // Create bookmarks table - Simplified
-    await queryDatabase(`
-      CREATE TABLE IF NOT EXISTS bookmarks (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        user_id VARCHAR(255) NOT NULL,
-        item_id UUID NOT NULL,
-        item_type VARCHAR(20) NOT NULL CHECK (item_type IN ('problem', 'note', 'interview')),
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(user_id, item_id, item_type)
-      )
-    `)
-
-    // Create indexes for better performance
-    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_problems_category ON problems(category)`)
-    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_problems_difficulty ON problems(difficulty)`)
-    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(category)`)
-    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_interviews_category ON interviews(category)`)
-    await queryDatabase(`CREATE INDEX IF NOT EXISTS idx_bookmarks_user_id ON bookmarks(user_id)`)
-
-    res.json({
-      success: true,
-      message: "All tables and indexes created successfully!",
-      tables: ["problems", "notes", "interviews", "bookmarks"],
-    })
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to create tables",
-      details: error.message,
-    })
-  }
-})
-
-// Insert sample data - Simplified
-app.post("/api/seed-data", async (req, res) => {
-  try {
-    // Insert sample problems
-    await queryDatabase(`
-      INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases, author_id)
-      VALUES 
-      ('Two Sum', 'Easy', 'Array', ARRAY['array', 'hash-table'], 
-       'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.',
-       'Use a hash map to store the complement of each number as you iterate through the array.',
-       'function twoSum(nums, target) {\n  const map = new Map();\n  for (let i = 0; i < nums.length; i++) {\n    const complement = target - nums[i];\n    if (map.has(complement)) {\n      return [map.get(complement), i];\n    }\n    map.set(nums[i], i);\n  }\n  return [];\n}',
-       '[{"input": {"nums": [2,7,11,15], "target": 9}, "output": [0,1]}, {"input": {"nums": [3,2,4], "target": 6}, "output": [1,2]}]',
-       'admin'),
-      ('Reverse String', 'Easy', 'String', ARRAY['string', 'two-pointers'], 
-       'Write a function that reverses a string. The input string is given as an array of characters s.',
-       'Use two pointers approach - one at the beginning and one at the end, swap characters and move towards center.',
-       'function reverseString(s) {\n  let left = 0;\n  let right = s.length - 1;\n  while (left < right) {\n    [s[left], s[right]] = [s[right], s[left]];\n    left++;\n    right--;\n  }\n  return s;\n}',
-       '[{"input": {"s": ["h","e","l","l","o"]}, "output": ["o","l","l","e","h"]}, {"input": {"s": ["H","a","n","n","a","h"]}, "output": ["h","a","n","n","a","H"]}]',
-       'admin')
-      ON CONFLICT DO NOTHING
-    `)
-
-    // Insert sample notes
-    await queryDatabase(`
-      INSERT INTO notes (title, category, tags, description, content, author_id)
-      VALUES 
-      ('JavaScript Closures', 'JavaScript', ARRAY['javascript', 'closures', 'scope'], 
-       'Understanding closures in JavaScript',
-       '# JavaScript Closures\n\nA closure is a function that has access to variables in its outer (enclosing) scope even after the outer function has returned.\n\n## Example\n\n\`\`\`javascript\nfunction outerFunction(x) {\n  return function innerFunction(y) {\n    return x + y;\n  };\n}\n\nconst addFive = outerFunction(5);\nconsole.log(addFive(3)); // 8\n\`\`\`',
-       'admin'),
-      ('Big O Notation', 'Algorithms', ARRAY['algorithms', 'complexity', 'big-o'], 
-       'Understanding time and space complexity',
-       '# Big O Notation\n\nBig O notation describes the performance or complexity of an algorithm.\n\n## Common Complexities\n\n- O(1) - Constant time\n- O(log n) - Logarithmic time\n- O(n) - Linear time\n- O(n log n) - Linearithmic time\n- O(n²) - Quadratic time',
-       'admin')
-      ON CONFLICT DO NOTHING
-    `)
-
-    // Insert sample interviews
-    await queryDatabase(`
-      INSERT INTO interviews (title, category, tags, description, content, author_id)
-      VALUES 
-      ('React Hooks Interview Questions', 'React', ARRAY['react', 'hooks', 'interview'], 
-       'Common React Hooks interview questions and answers',
-       '# React Hooks Interview Questions\n\n## 1. What are React Hooks?\n\nReact Hooks are functions that let you use state and other React features in functional components.\n\n## 2. What is useState?\n\nuseState is a Hook that lets you add state to functional components.\n\n\`\`\`javascript\nconst [count, setCount] = useState(0);\n\`\`\`',
-       'admin'),
-      ('JavaScript Interview Questions', 'JavaScript', ARRAY['javascript', 'interview', 'fundamentals'], 
-       'Essential JavaScript interview questions',
-       '# JavaScript Interview Questions\n\n## 1. What is hoisting?\n\nHoisting is JavaScript''s default behavior of moving declarations to the top of their scope.\n\n## 2. What is the difference between let, const, and var?\n\n- var: function-scoped, can be redeclared\n- let: block-scoped, cannot be reassigned',
-       'admin')
-      ON CONFLICT DO NOTHING
-    `)
-
-    res.json({
-      success: true,
-      message: "Sample data inserted successfully!",
-    })
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to insert sample data",
-      details: error.message,
-    })
-  }
-})
-
 // ==================== PROBLEMS CRUD ====================
 
 // Get all problems
@@ -416,7 +258,7 @@ app.get("/api/problems", async (req, res) => {
   try {
     const { category, difficulty, search } = req.query
     let query = `
-      SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at, author_id
+      SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at
       FROM problems
       WHERE 1=1
     `
@@ -460,7 +302,7 @@ app.get("/api/problems/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at, author_id
+      `SELECT id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at
        FROM problems
        WHERE id = $1`,
       [id],
@@ -486,7 +328,7 @@ app.get("/api/problems/:id", async (req, res) => {
   }
 })
 
-// Create new problem - SIMPLIFIED
+// Create new problem - NO AUTHOR_ID
 app.post("/api/problems", authenticateToken, async (req, res) => {
   try {
     const { title, difficulty, category, tags, description, explanation, code, test_cases } = req.body
@@ -499,10 +341,10 @@ app.post("/api/problems", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases, author_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO problems (title, difficulty, category, tags, description, explanation, code, test_cases)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id, title, difficulty, category, tags, description, explanation, code, test_cases, created_at`,
-      [title, difficulty, category, tags || [], description, explanation, code, test_cases, req.user.id],
+      [title, difficulty, category, tags || [], description, explanation, code, test_cases],
     )
 
     res.status(201).json({
@@ -597,7 +439,7 @@ app.get("/api/notes", async (req, res) => {
   try {
     const { category, search } = req.query
     let query = `
-      SELECT id, title, category, tags, description, content, created_at, author_id
+      SELECT id, title, category, tags, description, content, created_at
       FROM notes
       WHERE 1=1
     `
@@ -636,7 +478,7 @@ app.get("/api/notes/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, category, tags, description, content, created_at, author_id
+      `SELECT id, title, category, tags, description, content, created_at
        FROM notes
        WHERE id = $1`,
       [id],
@@ -662,7 +504,7 @@ app.get("/api/notes/:id", async (req, res) => {
   }
 })
 
-// Create new note
+// Create new note - NO AUTHOR_ID
 app.post("/api/notes", authenticateToken, async (req, res) => {
   try {
     const { title, category, tags, description, content } = req.body
@@ -675,10 +517,10 @@ app.post("/api/notes", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO notes (title, category, tags, description, content, author_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO notes (title, category, tags, description, content)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, title, category, tags, description, content, created_at`,
-      [title, category, tags || [], description, content, req.user.id],
+      [title, category, tags || [], description, content],
     )
 
     res.status(201).json({
@@ -770,7 +612,7 @@ app.get("/api/interviews", async (req, res) => {
   try {
     const { category, search } = req.query
     let query = `
-      SELECT id, title, category, tags, description, content, created_at, author_id
+      SELECT id, title, category, tags, description, content, created_at
       FROM interviews
       WHERE 1=1
     `
@@ -809,7 +651,7 @@ app.get("/api/interviews/:id", async (req, res) => {
   try {
     const { id } = req.params
     const result = await queryDatabase(
-      `SELECT id, title, category, tags, description, content, created_at, author_id
+      `SELECT id, title, category, tags, description, content, created_at
        FROM interviews
        WHERE id = $1`,
       [id],
@@ -835,7 +677,7 @@ app.get("/api/interviews/:id", async (req, res) => {
   }
 })
 
-// Create new interview
+// Create new interview - NO AUTHOR_ID
 app.post("/api/interviews", authenticateToken, async (req, res) => {
   try {
     const { title, category, tags, description, content } = req.body
@@ -848,10 +690,10 @@ app.post("/api/interviews", authenticateToken, async (req, res) => {
     }
 
     const result = await queryDatabase(
-      `INSERT INTO interviews (title, category, tags, description, content, author_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO interviews (title, category, tags, description, content)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, title, category, tags, description, content, created_at`,
-      [title, category, tags || [], description, content, req.user.id],
+      [title, category, tags || [], description, content],
     )
 
     res.status(201).json({
@@ -982,7 +824,12 @@ app.post("/api/auth/login", async (req, res) => {
 app.get("/api/auth/me", authenticateToken, (req, res) => {
   res.json({
     success: true,
-    user: req.user,
+    user: {
+      id: "admin",
+      email: "admin@example.com",
+      name: "Admin User",
+      role: "admin",
+    },
   })
 })
 
@@ -1005,7 +852,7 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
       LEFT JOIN interviews i ON b.item_id = i.id AND b.item_type = 'interview'
       WHERE b.user_id = $1
     `
-    const params = [req.user.id]
+    const params = ["admin"]
 
     if (item_type) {
       params.push(item_type)
@@ -1065,7 +912,7 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id, item_id, item_type) DO NOTHING
        RETURNING id, item_id, item_type, created_at`,
-      [req.user.id, actualItemId, item_type],
+      ["admin", actualItemId, item_type],
     )
 
     if (result.rows.length === 0) {
@@ -1096,7 +943,7 @@ app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
 
     const result = await queryDatabase(
       `DELETE FROM bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
-      [id, req.user.id],
+      [id, "admin"],
     )
 
     if (result.rows.length === 0) {
@@ -1125,13 +972,6 @@ app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
 // Get admin statistics
 app.get("/api/admin/stats", authenticateToken, async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        error: "Admin access required",
-      })
-    }
-
     const [problemsCount, notesCount, interviewsCount, bookmarksCount] = await Promise.all([
       queryDatabase("SELECT COUNT(*) as count FROM problems"),
       queryDatabase("SELECT COUNT(*) as count FROM notes"),
