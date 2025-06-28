@@ -1249,13 +1249,14 @@ app.delete("/api/bookmarks/:item_id", authenticateToken, async (req, res) => {
 
 // Remove bookmark by bookmark database ID
 // This handles: DELETE /api/bookmarks/id/:id
-app.delete("/api/bookmarks/id/:id", async (req, res) => {
+app.delete("/api/bookmarks/id/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
+    const userId = req.user.id
 
     const result = await queryDatabase(
       `DELETE FROM user_bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
-      [id, "admin"],
+      [id, userId]
     )
 
     if (result.rows.length === 0) {
@@ -1265,21 +1266,13 @@ app.delete("/api/bookmarks/id/:id", async (req, res) => {
       })
     }
 
-    // Get updated user bookmarks
-    const updatedBookmarks = await getUserBookmarks("admin")
+    const updatedBookmarks = await getUserBookmarks(userId)
+    const userInfo = await buildUserResponse(userId, updatedBookmarks)
 
     res.json({
       success: true,
       message: "Bookmark removed successfully",
-      user: {
-        id: "admin",
-        email: "admin@example.com",
-        name: "Admin User",
-        role: "admin",
-        bookmarks: updatedBookmarks,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
+      user: userInfo,
       deleted: result.rows[0],
     })
   } catch (error) {
@@ -1291,6 +1284,7 @@ app.delete("/api/bookmarks/id/:id", async (req, res) => {
     })
   }
 })
+
 
 // ==================== ADMIN STATS ====================
 
