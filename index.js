@@ -49,66 +49,6 @@ async function queryDatabase(text, params = []) {
   }
 }
 
-// Helper function to check if string is valid UUID
-function isValidUUID(str) {
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-  return uuidRegex.test(str)
-}
-
-// Helper function to find item by string ID and get its UUID
-async function findItemUUID(itemId, itemType) {
-  try {
-    // If it's already a UUID, return it
-    if (isValidUUID(itemId)) {
-      return itemId
-    }
-
-    // Otherwise, try to find the item by title or other identifier
-    let query
-    let tableName
-
-    switch (itemType) {
-      case "problem":
-        tableName = "problems"
-        break
-      case "note":
-        tableName = "notes"
-        break
-      case "interview":
-        tableName = "interviews"
-        break
-      default:
-        throw new Error("Invalid item type")
-    }
-
-    // Try to find by title first (case insensitive)
-    query = `SELECT id FROM ${tableName} WHERE LOWER(title) = LOWER($1) LIMIT 1`
-    let result = await queryDatabase(query, [itemId])
-
-    if (result.rows.length > 0) {
-      return result.rows[0].id
-    }
-
-    // If not found by title, try to find by ID if it looks like a slug
-    query = `SELECT id FROM ${tableName} WHERE 
-             LOWER(title) LIKE LOWER($1) OR 
-             LOWER(category) LIKE LOWER($1) OR
-             $1 = ANY(tags)
-             LIMIT 1`
-    result = await queryDatabase(query, [`%${itemId}%`])
-
-    if (result.rows.length > 0) {
-      return result.rows[0].id
-    }
-
-    // If still not found, return null
-    return null
-  } catch (error) {
-    console.error("Error finding item UUID:", error)
-    return null
-  }
-}
-
 // Simple connection test without keeping connection open
 async function testConnection() {
   try {
@@ -833,9 +773,9 @@ app.get("/api/auth/me", authenticateToken, (req, res) => {
   })
 })
 
-// ==================== BOOKMARKS ENDPOINTS - FIXED ====================
+// ==================== BOOKMARKS ENDPOINTS - NO UUID ====================
 
-// Get user bookmarks - REAL IMPLEMENTATION
+// Get user bookmarks - COMPLETELY UUID FREE
 app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
     const { item_type } = req.query
@@ -845,18 +785,19 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
-        AND table_name = 'bookmarks'
+        AND table_name = 'simple_bookmarks'
       );
     `)
 
     if (!tableCheck.rows[0].exists) {
-      // Create bookmarks table if it doesn't exist
+      // Create simple bookmarks table - NO UUID CONSTRAINTS
       await queryDatabase(`
-        CREATE TABLE IF NOT EXISTS bookmarks (
+        CREATE TABLE IF NOT EXISTS simple_bookmarks (
           id SERIAL PRIMARY KEY,
           user_id VARCHAR(255) NOT NULL,
-          item_id UUID NOT NULL,
+          item_id VARCHAR(255) NOT NULL,
           item_type VARCHAR(50) NOT NULL,
+          item_title VARCHAR(500),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(user_id, item_id, item_type)
         );
@@ -864,26 +805,18 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
     }
 
     let query = `
-      SELECT b.id, b.item_id, b.item_type, b.created_at,
-             CASE 
-               WHEN b.item_type = 'problem' THEN p.title
-               WHEN b.item_type = 'note' THEN n.title
-               WHEN b.item_type = 'interview' THEN i.title
-             END as title
-      FROM bookmarks b
-      LEFT JOIN problems p ON b.item_id = p.id AND b.item_type = 'problem'
-      LEFT JOIN notes n ON b.item_id = n.id AND b.item_type = 'note'
-      LEFT JOIN interviews i ON b.item_id = i.id AND b.item_type = 'interview'
-      WHERE b.user_id = $1
+      SELECT id, item_id, item_type, item_title, created_at
+      FROM simple_bookmarks
+      WHERE user_id = $1
     `
     const params = ["admin"]
 
     if (item_type) {
       params.push(item_type)
-      query += ` AND b.item_type = $${params.length}`
+      query += ` AND item_type = $${params.length}`
     }
 
-    query += ` ORDER BY b.created_at DESC`
+    query += ` ORDER BY created_at DESC`
 
     const result = await queryDatabase(query, params)
 
@@ -902,11 +835,11 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Add bookmark - REAL IMPLEMENTATION
+// Add bookmark - COMPLETELY UUID FREE
 app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
     const { item_id, item_type, user_id } = req.body
-    const actualUserId = user_id || "admin" // Use provided user_id or default to admin
+    const actualUserId = user_id || "admin"
 
     if (!item_id || !item_type) {
       return res.status(400).json({
@@ -928,48 +861,44 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
       SELECT EXISTS (
         SELECT FROM information_schema.tables 
         WHERE table_schema = 'public' 
-        AND table_name = 'bookmarks'
+        AND table_name = 'simple_bookmarks'
       );
     `)
 
     if (!tableCheck.rows[0].exists) {
-      // Create bookmarks table if it doesn't exist
+      // Create simple bookmarks table - NO UUID CONSTRAINTS
       await queryDatabase(`
-        CREATE TABLE IF NOT EXISTS bookmarks (
+        CREATE TABLE IF NOT EXISTS simple_bookmarks (
           id SERIAL PRIMARY KEY,
           user_id VARCHAR(255) NOT NULL,
-          item_id UUID NOT NULL,
+          item_id VARCHAR(255) NOT NULL,
           item_type VARCHAR(50) NOT NULL,
+          item_title VARCHAR(500),
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           UNIQUE(user_id, item_id, item_type)
         );
       `)
     }
 
-    // Verify the item exists in the respective table
-    let itemExists = false
+    // Get item title for display
+    let itemTitle = "Unknown Item"
     try {
       const tableName = item_type + "s" // problem -> problems, note -> notes, etc.
-      const checkResult = await queryDatabase(`SELECT id FROM ${tableName} WHERE id = $1 LIMIT 1`, [item_id])
-      itemExists = checkResult.rows.length > 0
+      const titleResult = await queryDatabase(`SELECT title FROM ${tableName} WHERE id = $1 LIMIT 1`, [item_id])
+      if (titleResult.rows.length > 0) {
+        itemTitle = titleResult.rows[0].title
+      }
     } catch (error) {
-      console.error("Error checking item existence:", error)
+      console.log("Could not fetch item title, using default")
     }
 
-    if (!itemExists) {
-      return res.status(404).json({
-        success: false,
-        error: `${item_type} with id '${item_id}' not found`,
-      })
-    }
-
-    // Insert bookmark
+    // Insert bookmark - treating item_id as string, no UUID conversion
     const result = await queryDatabase(
-      `INSERT INTO bookmarks (user_id, item_id, item_type)
-       VALUES ($1, $2, $3)
+      `INSERT INTO simple_bookmarks (user_id, item_id, item_type, item_title)
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id, item_id, item_type) DO NOTHING
-       RETURNING id, item_id, item_type, created_at`,
-      [actualUserId, item_id, item_type],
+       RETURNING id, item_id, item_type, item_title, created_at`,
+      [actualUserId, item_id, item_type, itemTitle],
     )
 
     if (result.rows.length === 0) {
@@ -994,14 +923,14 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Remove bookmark by item_id and item_type - REAL IMPLEMENTATION
-app.delete("/api/bookmarks/:item_id/:item_type", authenticateToken, async (req, res) => {
+// Remove bookmark by bookmark ID
+app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
   try {
-    const { item_id, item_type } = req.params
+    const { id } = req.params
 
     const result = await queryDatabase(
-      `DELETE FROM bookmarks WHERE item_id = $1 AND item_type = $2 AND user_id = $3 RETURNING id, item_id, item_type`,
-      [item_id, item_type, "admin"],
+      `DELETE FROM simple_bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
+      [id, "admin"],
     )
 
     if (result.rows.length === 0) {
@@ -1026,14 +955,14 @@ app.delete("/api/bookmarks/:item_id/:item_type", authenticateToken, async (req, 
   }
 })
 
-// Remove bookmark by bookmark ID - REAL IMPLEMENTATION
-app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
+// Remove bookmark by item_id and item_type
+app.delete("/api/bookmarks/item/:item_id/:item_type", authenticateToken, async (req, res) => {
   try {
-    const { id } = req.params
+    const { item_id, item_type } = req.params
 
     const result = await queryDatabase(
-      `DELETE FROM bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
-      [id, "admin"],
+      `DELETE FROM simple_bookmarks WHERE item_id = $1 AND item_type = $2 AND user_id = $3 RETURNING id, item_id, item_type`,
+      [item_id, item_type, "admin"],
     )
 
     if (result.rows.length === 0) {
@@ -1072,7 +1001,7 @@ app.get("/api/admin/stats", authenticateToken, async (req, res) => {
     // Try to get bookmarks count, but don't fail if table doesn't exist
     let bookmarksCount = 0
     try {
-      const bookmarksResult = await queryDatabase("SELECT COUNT(*) as count FROM bookmarks")
+      const bookmarksResult = await queryDatabase("SELECT COUNT(*) as count FROM simple_bookmarks")
       bookmarksCount = Number.parseInt(bookmarksResult.rows[0].count)
     } catch (error) {
       console.log("Bookmarks table doesn't exist yet, count = 0")
