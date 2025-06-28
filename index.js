@@ -184,6 +184,7 @@ app.use(
       "http://localhost:3001",
       "https://v0-react-dsa-website-ashiks-projects-9613a13b.vercel.app",
       "https://v0-react-dsa-website.vercel.app",
+      "https://learning.ashikagumbe.com"
     ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
