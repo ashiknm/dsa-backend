@@ -910,6 +910,58 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
   }
 })
 
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { email, password, name } = req.body
+
+    if (!email || !password || !name) {
+      return res.status(400).json({
+        success: false,
+        error: "Name, email, and password are required",
+      })
+    }
+
+    // Check if user already exists
+    const existing = await queryDatabase("SELECT id FROM users WHERE email = $1", [email])
+    if (existing.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: "User already exists",
+      })
+    }
+
+    // (In production, hash the password using bcrypt)
+    const result = await queryDatabase(
+      `INSERT INTO users (name, email, password_hash, role, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
+       RETURNING id, name, email, role, created_at, updated_at`,
+      [name, email, password, "user"]
+    )
+
+    const user = result.rows[0]
+    const token = `user-token-${user.id}`
+    const bookmarks = await getUserBookmarks(user.id) // or [] if empty
+
+    res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      user: {
+        ...user,
+        bookmarks,
+      },
+      token,
+    })
+  } catch (error) {
+    console.error("Register error:", error)
+    res.status(500).json({
+      success: false,
+      error: "Registration failed",
+      details: error.message,
+    })
+  }
+})
+
+
 // ==================== BOOKMARKS ENDPOINTS - TOGGLE SYSTEM ====================
 
 // Toggle bookmark (add if not exists, remove if exists)
