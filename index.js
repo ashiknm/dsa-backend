@@ -1041,12 +1041,26 @@ app.post("/api/auth/register", async (req, res) => {
 
 
 // ==================== BOOKMARKS ENDPOINTS - TOGGLE SYSTEM ====================
+async function buildUserResponse(userId, bookmarks) {
+  const result = await queryDatabase(
+    "SELECT id, email, name, role, created_at, updated_at FROM users WHERE id = $1",
+    [userId]
+  )
+
+  const user = result.rows[0]
+
+  return {
+    ...user,
+    bookmarks,
+  }
+}
+
 
 // Toggle bookmark (add if not exists, remove if exists)
-app.post("/api/bookmarks", async (req, res) => {
+app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
-    const { user_id, item_id, item_type } = req.body
-    const actualUserId = user_id || "admin"
+    const { item_id, item_type } = req.body
+    const userId = req.user.id
 
     if (!item_id || !item_type) {
       return res.status(400).json({
@@ -1055,7 +1069,6 @@ app.post("/api/bookmarks", async (req, res) => {
       })
     }
 
-    // Validate item_type
     if (!["problem", "note", "interview"].includes(item_type)) {
       return res.status(400).json({
         success: false,
@@ -1063,82 +1076,56 @@ app.post("/api/bookmarks", async (req, res) => {
       })
     }
 
-    // Check if bookmark already exists
     const existingBookmark = await queryDatabase(
       "SELECT id FROM user_bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3",
-      [actualUserId, item_id, item_type],
+      [userId, item_id, item_type]
     )
 
     if (existingBookmark.rows.length > 0) {
-      // Remove bookmark if it exists
-      await queryDatabase("DELETE FROM user_bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3", [
-        actualUserId,
-        item_id,
-        item_type,
-      ])
+      // Remove bookmark
+      await queryDatabase(
+        "DELETE FROM user_bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3",
+        [userId, item_id, item_type]
+      )
 
-      // Get updated user bookmarks
-      const updatedBookmarks = await getUserBookmarks(actualUserId)
-
-      res.json({
+      const updatedBookmarks = await getUserBookmarks(userId)
+      return res.json({
         success: true,
         action: "removed",
         message: "Bookmark removed successfully",
-        user: {
-          id: actualUserId,
-          email: "admin@example.com",
-          name: "Admin User",
-          role: "admin",
-          bookmarks: updatedBookmarks,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      })
-    } else {
-      // Get item title for better display
-      let itemTitle = "Unknown Item"
-      try {
-        let titleQuery
-        if (item_type === "problem") {
-          titleQuery = await queryDatabase("SELECT title FROM problems WHERE id = $1", [item_id])
-        } else if (item_type === "note") {
-          titleQuery = await queryDatabase("SELECT title FROM notes WHERE id = $1", [item_id])
-        } else if (item_type === "interview") {
-          titleQuery = await queryDatabase("SELECT title FROM interviews WHERE id = $1", [item_id])
-        }
-
-        if (titleQuery && titleQuery.rows.length > 0) {
-          itemTitle = titleQuery.rows[0].title
-        }
-      } catch (titleError) {
-        console.error("Error fetching item title:", titleError)
-      }
-
-      // Add new bookmark
-      await queryDatabase(
-        `INSERT INTO user_bookmarks (user_id, item_id, item_type, item_title)
-         VALUES ($1, $2, $3, $4)`,
-        [actualUserId, item_id, item_type, itemTitle],
-      )
-
-      // Get updated user bookmarks
-      const updatedBookmarks = await getUserBookmarks(actualUserId)
-
-      res.status(201).json({
-        success: true,
-        action: "added",
-        message: "Bookmark added successfully",
-        user: {
-          id: actualUserId,
-          email: "admin@example.com",
-          name: "Admin User",
-          role: "admin",
-          bookmarks: updatedBookmarks,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
+        user: await buildUserResponse(userId, updatedBookmarks),
       })
     }
+
+    // Get item title
+    let itemTitle = "Unknown Item"
+    try {
+      const tableMap = {
+        problem: "problems",
+        note: "notes",
+        interview: "interviews",
+      }
+      const titleQuery = await queryDatabase(`SELECT title FROM ${tableMap[item_type]} WHERE id = $1`, [item_id])
+      if (titleQuery.rows.length > 0) {
+        itemTitle = titleQuery.rows[0].title
+      }
+    } catch (err) {
+      console.error("Error fetching item title:", err)
+    }
+
+    // Insert new bookmark
+    await queryDatabase(
+      `INSERT INTO user_bookmarks (user_id, item_id, item_type, item_title) VALUES ($1, $2, $3, $4)`,
+      [userId, item_id, item_type, itemTitle]
+    )
+
+    const updatedBookmarks = await getUserBookmarks(userId)
+    res.status(201).json({
+      success: true,
+      action: "added",
+      message: "Bookmark added successfully",
+      user: await buildUserResponse(userId, updatedBookmarks),
+    })
   } catch (error) {
     console.error("Bookmarks POST error:", error)
     res.status(500).json({
@@ -1148,6 +1135,7 @@ app.post("/api/bookmarks", async (req, res) => {
     })
   }
 })
+
 
 // Get user bookmarks
 app.get("/api/bookmarks", async (req, res) => {
