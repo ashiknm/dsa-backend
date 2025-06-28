@@ -833,20 +833,67 @@ app.get("/api/auth/me", authenticateToken, (req, res) => {
   })
 })
 
-// ==================== BOOKMARKS ENDPOINTS - SIMPLIFIED ====================
+// ==================== BOOKMARKS ENDPOINTS - FIXED ====================
 
-// Get user bookmarks - SIMPLIFIED to avoid UUID issues
+// Get user bookmarks - REAL IMPLEMENTATION
 app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
-    // For now, return empty array since bookmarks table might have UUID constraints
-    // This can be implemented later when the table structure is clarified
+    const { item_type } = req.query
+
+    // First check if bookmarks table exists
+    const tableCheck = await queryDatabase(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'bookmarks'
+      );
+    `)
+
+    if (!tableCheck.rows[0].exists) {
+      // Create bookmarks table if it doesn't exist
+      await queryDatabase(`
+        CREATE TABLE IF NOT EXISTS bookmarks (
+          id SERIAL PRIMARY KEY,
+          user_id VARCHAR(255) NOT NULL,
+          item_id UUID NOT NULL,
+          item_type VARCHAR(50) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, item_id, item_type)
+        );
+      `)
+    }
+
+    let query = `
+      SELECT b.id, b.item_id, b.item_type, b.created_at,
+             CASE 
+               WHEN b.item_type = 'problem' THEN p.title
+               WHEN b.item_type = 'note' THEN n.title
+               WHEN b.item_type = 'interview' THEN i.title
+             END as title
+      FROM bookmarks b
+      LEFT JOIN problems p ON b.item_id = p.id AND b.item_type = 'problem'
+      LEFT JOIN notes n ON b.item_id = n.id AND b.item_type = 'note'
+      LEFT JOIN interviews i ON b.item_id = i.id AND b.item_type = 'interview'
+      WHERE b.user_id = $1
+    `
+    const params = ["admin"]
+
+    if (item_type) {
+      params.push(item_type)
+      query += ` AND b.item_type = $${params.length}`
+    }
+
+    query += ` ORDER BY b.created_at DESC`
+
+    const result = await queryDatabase(query, params)
+
     res.json({
       success: true,
-      count: 0,
-      bookmarks: [],
-      message: "Bookmarks feature temporarily disabled due to database constraints"
+      count: result.rows.length,
+      bookmarks: result.rows,
     })
   } catch (error) {
+    console.error("Bookmarks GET error:", error)
     res.status(500).json({
       success: false,
       error: "Failed to fetch bookmarks",
@@ -855,10 +902,11 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Add bookmark - SIMPLIFIED to avoid UUID issues
+// Add bookmark - REAL IMPLEMENTATION
 app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
-    const { item_id, item_type } = req.body
+    const { item_id, item_type, user_id } = req.body
+    const actualUserId = user_id || "admin" // Use provided user_id or default to admin
 
     if (!item_id || !item_type) {
       return res.status(400).json({
@@ -875,18 +923,69 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
       })
     }
 
-    // For now, just return success without actually saving to avoid UUID issues
+    // First check if bookmarks table exists
+    const tableCheck = await queryDatabase(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = 'bookmarks'
+      );
+    `)
+
+    if (!tableCheck.rows[0].exists) {
+      // Create bookmarks table if it doesn't exist
+      await queryDatabase(`
+        CREATE TABLE IF NOT EXISTS bookmarks (
+          id SERIAL PRIMARY KEY,
+          user_id VARCHAR(255) NOT NULL,
+          item_id UUID NOT NULL,
+          item_type VARCHAR(50) NOT NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(user_id, item_id, item_type)
+        );
+      `)
+    }
+
+    // Verify the item exists in the respective table
+    let itemExists = false
+    try {
+      const tableName = item_type + "s" // problem -> problems, note -> notes, etc.
+      const checkResult = await queryDatabase(`SELECT id FROM ${tableName} WHERE id = $1 LIMIT 1`, [item_id])
+      itemExists = checkResult.rows.length > 0
+    } catch (error) {
+      console.error("Error checking item existence:", error)
+    }
+
+    if (!itemExists) {
+      return res.status(404).json({
+        success: false,
+        error: `${item_type} with id '${item_id}' not found`,
+      })
+    }
+
+    // Insert bookmark
+    const result = await queryDatabase(
+      `INSERT INTO bookmarks (user_id, item_id, item_type)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, item_id, item_type) DO NOTHING
+       RETURNING id, item_id, item_type, created_at`,
+      [actualUserId, item_id, item_type],
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(409).json({
+        success: false,
+        error: "Bookmark already exists",
+      })
+    }
+
     res.status(201).json({
       success: true,
-      message: "Bookmark feature temporarily disabled due to database constraints",
-      bookmark: {
-        id: "temp-id",
-        item_id: item_id,
-        item_type: item_type,
-        created_at: new Date().toISOString()
-      },
+      message: "Bookmark added successfully",
+      bookmark: result.rows[0],
     })
   } catch (error) {
+    console.error("Bookmarks POST error:", error)
     res.status(500).json({
       success: false,
       error: "Failed to add bookmark",
@@ -895,20 +994,62 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Remove bookmark - SIMPLIFIED
+// Remove bookmark by item_id and item_type - REAL IMPLEMENTATION
+app.delete("/api/bookmarks/:item_id/:item_type", authenticateToken, async (req, res) => {
+  try {
+    const { item_id, item_type } = req.params
+
+    const result = await queryDatabase(
+      `DELETE FROM bookmarks WHERE item_id = $1 AND item_type = $2 AND user_id = $3 RETURNING id, item_id, item_type`,
+      [item_id, item_type, "admin"],
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Bookmark not found",
+      })
+    }
+
+    res.json({
+      success: true,
+      message: "Bookmark removed successfully",
+      deleted: result.rows[0],
+    })
+  } catch (error) {
+    console.error("Bookmarks DELETE error:", error)
+    res.status(500).json({
+      success: false,
+      error: "Failed to remove bookmark",
+      details: error.message,
+    })
+  }
+})
+
+// Remove bookmark by bookmark ID - REAL IMPLEMENTATION
 app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
 
-    // For now, just return success
+    const result = await queryDatabase(
+      `DELETE FROM bookmarks WHERE id = $1 AND user_id = $2 RETURNING id, item_id, item_type`,
+      [id, "admin"],
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Bookmark not found",
+      })
+    }
+
     res.json({
       success: true,
-      message: "Bookmark feature temporarily disabled due to database constraints",
-      deleted: {
-        id: id,
-      },
+      message: "Bookmark removed successfully",
+      deleted: result.rows[0],
     })
   } catch (error) {
+    console.error("Bookmarks DELETE error:", error)
     res.status(500).json({
       success: false,
       error: "Failed to remove bookmark",
@@ -928,13 +1069,22 @@ app.get("/api/admin/stats", authenticateToken, async (req, res) => {
       queryDatabase("SELECT COUNT(*) as count FROM interviews"),
     ])
 
+    // Try to get bookmarks count, but don't fail if table doesn't exist
+    let bookmarksCount = 0
+    try {
+      const bookmarksResult = await queryDatabase("SELECT COUNT(*) as count FROM bookmarks")
+      bookmarksCount = Number.parseInt(bookmarksResult.rows[0].count)
+    } catch (error) {
+      console.log("Bookmarks table doesn't exist yet, count = 0")
+    }
+
     res.json({
       success: true,
       stats: {
         problems: Number.parseInt(problemsCount.rows[0].count),
         notes: Number.parseInt(notesCount.rows[0].count),
         interviews: Number.parseInt(interviewsCount.rows[0].count),
-        bookmarks: 0, // Temporarily disabled
+        bookmarks: bookmarksCount,
       },
     })
   } catch (error) {
