@@ -49,6 +49,68 @@ async function queryDatabase(text, params = []) {
   }
 }
 
+// Helper function to check if string is valid UUID
+function isValidUUID(str) {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidRegex.test(str)
+}
+
+// Helper function to find item by string ID and get its UUID
+async function findItemUUID(itemId, itemType) {
+  try {
+    // If it's already a UUID, return it
+    if (isValidUUID(itemId)) {
+      return itemId
+    }
+
+    // Otherwise, try to find the item by title or other identifier
+    let query
+    let tableName
+
+    switch (itemType) {
+      case "problem":
+        tableName = "problems"
+        break
+      case "note":
+        tableName = "notes"
+        break
+      case "interview":
+        tableName = "interviews"
+        break
+      default:
+        throw new Error("Invalid item type")
+    }
+
+    // Try to find by title first (case insensitive)
+    query = `SELECT id FROM ${tableName} WHERE LOWER(title) = LOWER($1) LIMIT 1`
+    let result = await queryDatabase(query, [itemId])
+
+    if (result.rows.length > 0) {
+      return result.rows[0].id
+    }
+
+    // If not found by title, try to find by ID if it looks like a slug
+    // For now, we'll create a mapping table or use a different approach
+    // Let's try to find by any text field that might match
+    query = `SELECT id FROM ${tableName} WHERE 
+             LOWER(title) LIKE LOWER($1) OR 
+             LOWER(category) LIKE LOWER($1) OR
+             $1 = ANY(tags)
+             LIMIT 1`
+    result = await queryDatabase(query, [`%${itemId}%`])
+
+    if (result.rows.length > 0) {
+      return result.rows[0].id
+    }
+
+    // If still not found, return null
+    return null
+  } catch (error) {
+    console.error("Error finding item UUID:", error)
+    return null
+  }
+}
+
 // Simple connection test without keeping connection open
 async function testConnection() {
   try {
@@ -1005,7 +1067,7 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Add bookmark - Updated to work with your schema (UUID item_id)
+// Add bookmark - Updated to handle string IDs by finding the actual UUID
 app.post("/api/bookmarks", authenticateToken, async (req, res) => {
   try {
     const { item_id, item_type } = req.body
@@ -1025,12 +1087,22 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
       })
     }
 
+    // Try to find the actual UUID for the item
+    const actualItemId = await findItemUUID(item_id, item_type)
+
+    if (!actualItemId) {
+      return res.status(404).json({
+        success: false,
+        error: `${item_type} with identifier '${item_id}' not found`,
+      })
+    }
+
     const result = await queryDatabase(
       `INSERT INTO bookmarks (user_id, item_id, item_type)
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id, item_id, item_type) DO NOTHING
        RETURNING id, item_id, item_type, created_at`,
-      [req.user.id, item_id, item_type],
+      [req.user.id, actualItemId, item_type],
     )
 
     if (result.rows.length === 0) {
@@ -1090,9 +1162,19 @@ app.delete("/api/bookmarks/item/:item_id/:item_type", authenticateToken, async (
   try {
     const { item_id, item_type } = req.params
 
+    // Try to find the actual UUID for the item
+    const actualItemId = await findItemUUID(item_id, item_type)
+
+    if (!actualItemId) {
+      return res.status(404).json({
+        success: false,
+        error: `${item_type} with identifier '${item_id}' not found`,
+      })
+    }
+
     const result = await queryDatabase(
       `DELETE FROM bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3 RETURNING id, item_id, item_type`,
-      [req.user.id, item_id, item_type],
+      [req.user.id, actualItemId, item_type],
     )
 
     if (result.rows.length === 0) {
