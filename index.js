@@ -244,7 +244,8 @@ app.get("/", (req, res) => {
       bookmarks: {
         getAll: "GET /api/bookmarks",
         toggle: "POST /api/bookmarks (toggle add/remove)",
-        remove: "DELETE /api/bookmarks/:id",
+        removeByItemId: "DELETE /api/bookmarks/:item_id?type=:item_type",
+        removeById: "DELETE /api/bookmarks/id/:id",
       },
     },
   })
@@ -1054,8 +1055,77 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
   }
 })
 
-// Remove bookmark by bookmark ID
-app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
+// Remove bookmark by item_id with query parameter type
+// This handles: DELETE /api/bookmarks/:item_id?type=:item_type
+app.delete("/api/bookmarks/:item_id", authenticateToken, async (req, res) => {
+  try {
+    const { item_id } = req.params
+    const { type } = req.query
+    const userId = "admin"
+
+    if (!type) {
+      return res.status(400).json({
+        success: false,
+        error: "Query parameter 'type' is required (e.g., ?type=interview)",
+      })
+    }
+
+    // Map frontend type to backend type
+    let item_type = type
+    if (type === "interviews") item_type = "interview"
+    if (type === "problems") item_type = "problem"
+    if (type === "notes") item_type = "note"
+
+    console.log(`Attempting to remove bookmark: user_id=${userId}, item_id=${item_id}, item_type=${item_type}`)
+
+    const result = await queryDatabase(
+      `DELETE FROM user_bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3 RETURNING id, item_id, item_type`,
+      [userId, item_id, item_type],
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Bookmark not found",
+        debug: {
+          user_id: userId,
+          item_id: item_id,
+          item_type: item_type,
+          original_type: type,
+        },
+      })
+    }
+
+    // Get updated user bookmarks
+    const updatedBookmarks = await getUserBookmarks(userId)
+
+    res.json({
+      success: true,
+      message: "Bookmark removed successfully",
+      user: {
+        id: userId,
+        email: "admin@example.com",
+        name: "Admin User",
+        role: "admin",
+        bookmarks: updatedBookmarks,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      deleted: result.rows[0],
+    })
+  } catch (error) {
+    console.error("Bookmarks DELETE error:", error)
+    res.status(500).json({
+      success: false,
+      error: "Failed to remove bookmark",
+      details: error.message,
+    })
+  }
+})
+
+// Remove bookmark by bookmark database ID
+// This handles: DELETE /api/bookmarks/id/:id
+app.delete("/api/bookmarks/id/:id", authenticateToken, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -1086,49 +1156,7 @@ app.delete("/api/bookmarks/:id", authenticateToken, async (req, res) => {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-    })
-  } catch (error) {
-    console.error("Bookmarks DELETE error:", error)
-    res.status(500).json({
-      success: false,
-      error: "Failed to remove bookmark",
-      details: error.message,
-    })
-  }
-})
-
-// Remove bookmark by item_id and item_type
-app.delete("/api/bookmarks/:item_id/:item_type", authenticateToken, async (req, res) => {
-  try {
-    const { item_id, item_type } = req.params
-
-    const result = await queryDatabase(
-      `DELETE FROM user_bookmarks WHERE item_id = $1 AND item_type = $2 AND user_id = $3 RETURNING id, item_id, item_type`,
-      [item_id, item_type, "admin"],
-    )
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: "Bookmark not found",
-      })
-    }
-
-    // Get updated user bookmarks
-    const updatedBookmarks = await getUserBookmarks("admin")
-
-    res.json({
-      success: true,
-      message: "Bookmark removed successfully",
-      user: {
-        id: "admin",
-        email: "admin@example.com",
-        name: "Admin User",
-        role: "admin",
-        bookmarks: updatedBookmarks,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
+      deleted: result.rows[0],
     })
   } catch (error) {
     console.error("Bookmarks DELETE error:", error)
