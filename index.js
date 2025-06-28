@@ -924,21 +924,51 @@ app.post("/api/auth/login", async (req, res) => {
 // Get current user - Returns user with bookmarks in frontend format
 app.get("/api/auth/me", authenticateToken, async (req, res) => {
   try {
-    const bookmarks = await getUserBookmarks("admin")
+    const userId = req.user.id
+
+    // 1️⃣ If admin, return hardcoded user
+    if (userId === "admin") {
+      const bookmarks = await getUserBookmarks("admin")
+
+      return res.json({
+        success: true,
+        user: {
+          id: "admin",
+          email: "admin@example.com",
+          name: "Admin User",
+          role: "admin",
+          bookmarks,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      })
+    }
+
+    // 2️⃣ Else fetch user from database
+    const result = await queryDatabase(
+      "SELECT id, email, name, role, created_at, updated_at FROM users WHERE id = $1",
+      [userId]
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      })
+    }
+
+    const user = result.rows[0]
+    const bookmarks = await getUserBookmarks(user.id)
 
     res.json({
       success: true,
       user: {
-        id: "admin",
-        email: "admin@example.com",
-        name: "Admin User",
-        role: "admin",
-        bookmarks: bookmarks,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        ...user,
+        bookmarks,
       },
     })
   } catch (error) {
+    console.error("Get user error:", error)
     res.status(500).json({
       success: false,
       error: "Failed to get current user",
@@ -946,6 +976,7 @@ app.get("/api/auth/me", authenticateToken, async (req, res) => {
     })
   }
 })
+
 
 app.post("/api/auth/register", async (req, res) => {
   try {
