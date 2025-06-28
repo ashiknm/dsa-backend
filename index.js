@@ -1175,11 +1175,11 @@ app.get("/api/bookmarks", async (req, res) => {
 
 // Remove bookmark by item_id with query parameter type
 // This handles: DELETE /api/bookmarks/:item_id?type=:item_type
-app.delete("/api/bookmarks/:item_id", async (req, res) => {
+app.delete("/api/bookmarks/:item_id", authenticateToken, async (req, res) => {
   try {
     const { item_id } = req.params
     const { type } = req.query
-    const userId = "admin"
+    const userId = req.user.id
 
     if (!type) {
       return res.status(400).json({
@@ -1188,17 +1188,29 @@ app.delete("/api/bookmarks/:item_id", async (req, res) => {
       })
     }
 
-    // Map frontend type to backend type
-    let item_type = type
-    if (type === "interviews") item_type = "interview"
-    if (type === "problems") item_type = "problem"
-    if (type === "notes") item_type = "note"
+    // Normalize frontend type to backend format
+    const typeMap = {
+      interviews: "interview",
+      problems: "problem",
+      notes: "note",
+      interview: "interview",
+      problem: "problem",
+      note: "note",
+    }
+
+    const item_type = typeMap[type]
+    if (!item_type) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid type '${type}'. Valid types are problems, notes, interviews.`,
+      })
+    }
 
     console.log(`Attempting to remove bookmark: user_id=${userId}, item_id=${item_id}, item_type=${item_type}`)
 
     const result = await queryDatabase(
       `DELETE FROM user_bookmarks WHERE user_id = $1 AND item_id = $2 AND item_type = $3 RETURNING id, item_id, item_type`,
-      [userId, item_id, item_type],
+      [userId, item_id, item_type]
     )
 
     if (result.rows.length === 0) {
@@ -1207,28 +1219,21 @@ app.delete("/api/bookmarks/:item_id", async (req, res) => {
         error: "Bookmark not found",
         debug: {
           user_id: userId,
-          item_id: item_id,
-          item_type: item_type,
+          item_id,
+          item_type,
           original_type: type,
         },
       })
     }
 
-    // Get updated user bookmarks
     const updatedBookmarks = await getUserBookmarks(userId)
+
+    const userInfo = await buildUserResponse(userId, updatedBookmarks)
 
     res.json({
       success: true,
       message: "Bookmark removed successfully",
-      user: {
-        id: userId,
-        email: "admin@example.com",
-        name: "Admin User",
-        role: "admin",
-        bookmarks: updatedBookmarks,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
+      user: userInfo,
       deleted: result.rows[0],
     })
   } catch (error) {
@@ -1240,6 +1245,7 @@ app.delete("/api/bookmarks/:item_id", async (req, res) => {
     })
   }
 })
+
 
 // Remove bookmark by bookmark database ID
 // This handles: DELETE /api/bookmarks/id/:id
