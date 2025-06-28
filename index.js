@@ -965,7 +965,7 @@ app.post("/api/auth/register", async (req, res) => {
 // ==================== BOOKMARKS ENDPOINTS - TOGGLE SYSTEM ====================
 
 // Toggle bookmark (add if not exists, remove if exists)
-app.post("/api/bookmarks", authenticateToken, async (req, res) => {
+app.post("/api/bookmarks", async (req, res) => {
   try {
     const { user_id, item_id, item_type } = req.body
     const actualUserId = user_id || "admin"
@@ -1072,7 +1072,7 @@ app.post("/api/bookmarks", authenticateToken, async (req, res) => {
 })
 
 // Get user bookmarks
-app.get("/api/bookmarks", authenticateToken, async (req, res) => {
+app.get("/api/bookmarks", async (req, res) => {
   try {
     const { item_type, user_id = "admin" } = req.query
 
@@ -1109,7 +1109,7 @@ app.get("/api/bookmarks", authenticateToken, async (req, res) => {
 
 // Remove bookmark by item_id with query parameter type
 // This handles: DELETE /api/bookmarks/:item_id?type=:item_type
-app.delete("/api/bookmarks/:item_id", authenticateToken, async (req, res) => {
+app.delete("/api/bookmarks/:item_id", async (req, res) => {
   try {
     const { item_id } = req.params
     const { type } = req.query
@@ -1177,7 +1177,7 @@ app.delete("/api/bookmarks/:item_id", authenticateToken, async (req, res) => {
 
 // Remove bookmark by bookmark database ID
 // This handles: DELETE /api/bookmarks/id/:id
-app.delete("/api/bookmarks/id/:id", authenticateToken, async (req, res) => {
+app.delete("/api/bookmarks/id/:id", async (req, res) => {
   try {
     const { id } = req.params
 
