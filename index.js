@@ -851,11 +851,11 @@ app.post("/api/auth/login", async (req, res) => {
       })
     }
 
-    // Hardcoded admin credentials for testing
+    // 1️⃣ Check for hardcoded admin credentials
     if (email === "admin@example.com" && password === "admin123") {
       const bookmarks = await getUserBookmarks("admin")
 
-      res.json({
+      return res.json({
         success: true,
         message: "Login successful",
         user: {
@@ -863,19 +863,56 @@ app.post("/api/auth/login", async (req, res) => {
           email: "admin@example.com",
           name: "Admin User",
           role: "admin",
-          bookmarks: bookmarks,
+          bookmarks,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
         token: "simple-admin-token-123",
       })
-    } else {
-      res.status(401).json({
+    }
+
+    // 2️⃣ Check database for regular user
+    const result = await queryDatabase(
+      "SELECT id, email, name, role, password_hash, created_at, updated_at FROM users WHERE email = $1",
+      [email]
+    )
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({
         success: false,
         error: "Invalid email or password",
       })
     }
+
+    const user = result.rows[0]
+
+    // (In production, use bcrypt.compare)
+    if (user.password_hash !== password) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid email or password",
+      })
+    }
+
+    const token = `user-token-${user.id}`
+    const bookmarks = await getUserBookmarks(user.id)
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        bookmarks,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      },
+      token,
+    })
   } catch (error) {
+    console.error("Login error:", error)
     res.status(500).json({
       success: false,
       error: "Login failed",
